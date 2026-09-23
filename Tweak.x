@@ -1,24 +1,29 @@
 #import <Foundation/Foundation.h>
 #import <objc/runtime.h>
-#import <substrate.h>
 #import <unistd.h>
 #import <stdio.h>
 #import <stdarg.h>
+#import <string.h>
 
-static FILE *HPLogFile(void) {
-    static FILE *f = NULL;
+typedef void (*SoftApClientEventFn)(
+    id,
+    SEL,
+    BOOL,
+    id,
+    BOOL,
+    BOOL,
+    BOOL,
+    BOOL
+);
+
+static SoftApClientEventFn originalSoftApClientEvent = NULL;
+
+static void HPLog(NSString *format, ...)
+{
+    FILE *f = fopen("/tmp/HotspotProbeV5.log", "a");
 
     if (!f)
-        f = fopen("/tmp/HotspotProbeV4.log", "a");
-
-    if (!f)
-        f = fopen("/var/tmp/HotspotProbeV4.log", "a");
-
-    return f;
-}
-
-static void HPLog(NSString *format, ...) {
-    FILE *f = HPLogFile();
+        f = fopen("/var/tmp/HotspotProbeV5.log", "a");
 
     if (!f)
         return;
@@ -32,43 +37,12 @@ static void HPLog(NSString *format, ...) {
 
     va_end(args);
 
-    fprintf(
-        f,
-        "%s\n",
-        line.UTF8String
-    );
-
+    fprintf(f, "%s\n", [line UTF8String]);
     fflush(f);
+    fclose(f);
 }
 
-
-/*
- Real encoding:
-
- v44@0:8B16@20B28B32B36B40
-
- self        @
- _cmd        :
- event       BOOL
- identifier  id
- Apple       BOOL
- InstantHS   BOOL
- AutoHS      BOOL
- Hidden      BOOL
-*/
-
-static void (*orig_addSoftApClientEvent)(
-    id,
-    SEL,
-    BOOL,
-    id,
-    BOOL,
-    BOOL,
-    BOOL,
-    BOOL
-);
-
-static void hook_addSoftApClientEvent(
+static void HookSoftApClientEvent(
     id self,
     SEL _cmd,
     BOOL event,
@@ -77,8 +51,8 @@ static void hook_addSoftApClientEvent(
     BOOL isInstantHotspot,
     BOOL isAutoHotspot,
     BOOL isHidden
-) {
-
+)
+{
     HPLog(
         @"EVENT=%d identifier=%@ Apple=%d InstantHS=%d AutoHS=%d Hidden=%d",
         event,
@@ -89,31 +63,33 @@ static void hook_addSoftApClientEvent(
         isHidden
     );
 
-    orig_addSoftApClientEvent(
-        self,
-        _cmd,
-        event,
-        identifier,
-        isAppleClient,
-        isInstantHotspot,
-        isAutoHotspot,
-        isHidden
-    );
+    if (originalSoftApClientEvent) {
+        originalSoftApClientEvent(
+            self,
+            _cmd,
+            event,
+            identifier,
+            isAppleClient,
+            isInstantHotspot,
+            isAutoHotspot,
+            isHidden
+        );
+    }
 }
 
 __attribute__((constructor))
-static void HPInit(void) {
-
+static void HotspotProbeInit(void)
+{
     @autoreleasepool {
 
         NSString *process =
-            [NSProcessInfo processInfo].processName;
+            [[NSProcessInfo processInfo] processName];
 
         if (![process isEqualToString:@"wifid"])
             return;
 
         HPLog(
-            @"HotspotProbe V4 START pid=%d",
+            @"===== HotspotProbe V5 START pid=%d =====",
             getpid()
         );
 
@@ -121,7 +97,7 @@ static void HPInit(void) {
             objc_getClass("WiFiUsageSoftApSession");
 
         if (!cls) {
-            HPLog(@"CLASS NOT FOUND");
+            HPLog(@"ERROR: WiFiUsageSoftApSession not found");
             return;
         }
 
@@ -134,22 +110,49 @@ static void HPInit(void) {
             class_getInstanceMethod(cls, sel);
 
         if (!method) {
-            HPLog(@"METHOD NOT FOUND");
+            HPLog(@"ERROR: method not found");
             return;
         }
 
+        const char *encoding =
+            method_getTypeEncoding(method);
+
         HPLog(
-            @"METHOD FOUND encoding=%s",
-            method_getTypeEncoding(method)
+            @"Encoding=%s",
+            encoding ? encoding : "(null)"
         );
 
-        MSHookMessageEx(
-            cls,
-            sel,
-            (IMP)hook_addSoftApClientEvent,
-            (IMP *)&orig_addSoftApClientEvent
-        );
+        /*
+         * Önceki güvenli taramada ölçtüğümüz gerçek encoding.
+         * Farklı çıkarsa hiçbir hook yapılmaz.
+         */
+        const char *expected =
+            "v44@0:8B16@20B28B32B36B40";
 
-        HPLog(@"HOOK INSTALLED");
+        if (!encoding ||
+            strcmp(encoding, expected) != 0) {
+
+            HPLog(
+                @"SAFETY STOP: encoding mismatch"
+            );
+
+            return;
+        }
+
+        IMP oldImplementation =
+            method_setImplementation(
+                method,
+                (IMP)HookSoftApClientEvent
+            );
+
+        if (!oldImplementation) {
+            HPLog(@"ERROR: method_setImplementation failed");
+            return;
+        }
+
+        originalSoftApClientEvent =
+            (SoftApClientEventFn)oldImplementation;
+
+        HPLog(@"V5 HOOK INSTALLED");
     }
 }
