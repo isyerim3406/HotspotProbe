@@ -20,10 +20,10 @@ static SoftApClientEventFn originalSoftApClientEvent = NULL;
 
 static void HPLog(NSString *format, ...)
 {
-    FILE *f = fopen("/tmp/HotspotProbeV5.log", "a");
+    FILE *f = fopen("/tmp/HotspotProbeV7.log", "a");
 
     if (!f)
-        f = fopen("/var/tmp/HotspotProbeV5.log", "a");
+        f = fopen("/var/tmp/HotspotProbeV7.log", "a");
 
     if (!f)
         return;
@@ -37,7 +37,7 @@ static void HPLog(NSString *format, ...)
 
     va_end(args);
 
-    fprintf(f, "%s\n", [line UTF8String]);
+    fprintf(f, "%s\n", line.UTF8String);
     fflush(f);
     fclose(f);
 }
@@ -54,7 +54,7 @@ static void HookSoftApClientEvent(
 )
 {
     HPLog(
-        @"EVENT=%d identifier=%@ Apple=%d InstantHS=%d AutoHS=%d Hidden=%d",
+        @"EVENT=%d identifier=%@ RECEIVED Apple=%d InstantHS=%d AutoHS=%d Hidden=%d -> PASS InstantHS=0",
         event,
         identifier,
         isAppleClient,
@@ -70,7 +70,7 @@ static void HookSoftApClientEvent(
             event,
             identifier,
             isAppleClient,
-            isInstantHotspot,
+            NO,
             isAutoHotspot,
             isHidden
         );
@@ -83,13 +83,13 @@ static void HotspotProbeInit(void)
     @autoreleasepool {
 
         NSString *process =
-            [[NSProcessInfo processInfo] processName];
+            [NSProcessInfo processInfo].processName;
 
         if (![process isEqualToString:@"wifid"])
             return;
 
         HPLog(
-            @"===== HotspotProbe V5 START pid=%d =====",
+            @"===== HotspotProbe V7 FORCE-INSTANT-OFF pid=%d =====",
             getpid()
         );
 
@@ -97,7 +97,7 @@ static void HotspotProbeInit(void)
             objc_getClass("WiFiUsageSoftApSession");
 
         if (!cls) {
-            HPLog(@"ERROR: WiFiUsageSoftApSession not found");
+            HPLog(@"ERROR: class not found");
             return;
         }
 
@@ -122,20 +122,13 @@ static void HotspotProbeInit(void)
             encoding ? encoding : "(null)"
         );
 
-        /*
-         * Önceki güvenli taramada ölçtüğümüz gerçek encoding.
-         * Farklı çıkarsa hiçbir hook yapılmaz.
-         */
         const char *expected =
             "v44@0:8B16@20B28B32B36B40";
 
         if (!encoding ||
             strcmp(encoding, expected) != 0) {
 
-            HPLog(
-                @"SAFETY STOP: encoding mismatch"
-            );
-
+            HPLog(@"SAFETY STOP: encoding mismatch");
             return;
         }
 
@@ -153,6 +146,6 @@ static void HotspotProbeInit(void)
         originalSoftApClientEvent =
             (SoftApClientEventFn)oldImplementation;
 
-        HPLog(@"V5 HOOK INSTALLED");
+        HPLog(@"V7 HOOK INSTALLED - InstantHS forced to 0");
     }
 }
