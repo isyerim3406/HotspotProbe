@@ -1,8 +1,8 @@
-Package: com.chatin.hotspotprobe
-Name: HotspotProbe
-Version: 0.7.0
+Package: com.chatin.hotspotdiag
+Name: HotspotDiag
+Version: 1.0.0
 Architecture: iphoneos-arm64
-Description: Test forcing Instant Hotspot client flag off.
+Description: Safe diagnostic logger for Personal Hotspot disconnect investigation.
 Maintainer: Chatin
 Author: Chatin
 Section: Tweaks
