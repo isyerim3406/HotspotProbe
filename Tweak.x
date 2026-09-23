@@ -5,6 +5,8 @@
 #import <stdarg.h>
 #import <string.h>
 
+#pragma mark - Function types
+
 typedef void (*SoftApClientEventFn)(
     id,
     SEL,
@@ -16,19 +18,59 @@ typedef void (*SoftApClientEventFn)(
     BOOL
 );
 
-static SoftApClientEventFn originalSoftApClientEvent = NULL;
+typedef void (*SoftApStateDidChangeFn)(
+    id,
+    SEL,
+    BOOL,
+    id,
+    id,
+    id,
+    unsigned long long,
+    unsigned long long,
+    BOOL,
+    BOOL,
+    BOOL,
+    double,
+    BOOL,
+    double
+);
+
+typedef void (*LinkStateDidChangeFn)(
+    id,
+    SEL,
+    BOOL,
+    BOOL,
+    long long,
+    long long,
+    id
+);
+
+typedef void (*SetTearDownReasonFn)(
+    id,
+    SEL,
+    id
+);
+
+#pragma mark - Original implementations
+
+static SoftApClientEventFn originalClientEvent = NULL;
+static SoftApStateDidChangeFn originalSoftApState = NULL;
+static LinkStateDidChangeFn originalLinkState = NULL;
+static SetTearDownReasonFn originalTearDownReason = NULL;
+
+#pragma mark - Logging
 
 static FILE *OpenLog(void)
 {
-    FILE *f = fopen("/tmp/HotspotDiag.log", "a");
+    FILE *f = fopen("/tmp/HotspotDiagV2.log", "a");
 
     if (!f)
-        f = fopen("/var/tmp/HotspotDiag.log", "a");
+        f = fopen("/var/tmp/HotspotDiagV2.log", "a");
 
     return f;
 }
 
-static void LogLine(NSString *format, ...)
+static void HPLog(NSString *format, ...)
 {
     FILE *f = OpenLog();
 
@@ -44,103 +86,28 @@ static void LogLine(NSString *format, ...)
 
     va_end(args);
 
-    fprintf(f, "%s\n", line.UTF8String);
+    NSDateFormatter *formatter =
+        [[NSDateFormatter alloc] init];
+
+    formatter.dateFormat = @"HH:mm:ss.SSS";
+
+    NSString *time =
+        [formatter stringFromDate:[NSDate date]];
+
+    fprintf(
+        f,
+        "[%s] %s\n",
+        time.UTF8String,
+        line.UTF8String
+    );
+
     fflush(f);
     fclose(f);
 }
 
-static void DumpMethod(
-    NSString *className,
-    NSString *selectorName
-)
-{
-    Class cls = objc_getClass(className.UTF8String);
+#pragma mark - Hooks
 
-    if (!cls) {
-        LogLine(
-            @"CLASS NOT FOUND: %@",
-            className
-        );
-        return;
-    }
-
-    SEL sel =
-        NSSelectorFromString(selectorName);
-
-    Method method =
-        class_getInstanceMethod(cls, sel);
-
-    if (!method) {
-        LogLine(
-            @"METHOD NOT FOUND: -[%@ %@]",
-            className,
-            selectorName
-        );
-        return;
-    }
-
-    const char *encoding =
-        method_getTypeEncoding(method);
-
-    unsigned int count =
-        method_getNumberOfArguments(method);
-
-    LogLine(@"--------------------------------------------------");
-
-    LogLine(
-        @"METHOD: -[%@ %@]",
-        className,
-        selectorName
-    );
-
-    LogLine(
-        @"ENCODING: %s",
-        encoding ? encoding : "(null)"
-    );
-
-    LogLine(
-        @"ARGUMENT COUNT: %u",
-        count
-    );
-
-    char returnType[256] = {0};
-
-    method_getReturnType(
-        method,
-        returnType,
-        sizeof(returnType)
-    );
-
-    LogLine(
-        @"RETURN TYPE: %s",
-        returnType
-    );
-
-    for (unsigned int i = 0; i < count; i++) {
-
-        char type[256] = {0};
-
-        method_getArgumentType(
-            method,
-            i,
-            type,
-            sizeof(type)
-        );
-
-        LogLine(
-            @"ARG %u TYPE: %s",
-            i,
-            type
-        );
-    }
-}
-
-/*
- Stable V5 event logger.
- This DOES NOT change any value.
-*/
-
-static void HookSoftApClientEvent(
+static void HookClientEvent(
     id self,
     SEL _cmd,
     BOOL event,
@@ -151,8 +118,8 @@ static void HookSoftApClientEvent(
     BOOL isHidden
 )
 {
-    LogLine(
-        @"CLIENT EVENT=%d identifier=%@ Apple=%d InstantHS=%d AutoHS=%d Hidden=%d",
+    HPLog(
+        @"CLIENT event=%d identifier=%@ Apple=%d InstantHS=%d AutoHS=%d Hidden=%d",
         event,
         identifier,
         isAppleClient,
@@ -161,8 +128,8 @@ static void HookSoftApClientEvent(
         isHidden
     );
 
-    if (originalSoftApClientEvent) {
-        originalSoftApClientEvent(
+    if (originalClientEvent) {
+        originalClientEvent(
             self,
             _cmd,
             event,
@@ -175,62 +142,188 @@ static void HookSoftApClientEvent(
     }
 }
 
-static void InstallSafeClientHook(void)
+static void HookSoftApState(
+    id self,
+    SEL _cmd,
+    BOOL state,
+    id requester,
+    id status,
+    id changeReason,
+    unsigned long long channelNumber,
+    unsigned long long countryCode,
+    BOOL isHidden,
+    BOOL isInfraConnected,
+    BOOL isAwdlUp,
+    double lowPowerModeDuration,
+    BOOL compatibilityMode,
+    double requestToUpLatency
+)
+{
+    HPLog(
+        @"SOFTAP state=%d requester=%@ status=%@ changeReason=%@ channel=%llu country=%llu Hidden=%d Infra=%d AWDL=%d lowPowerDuration=%.3f compatibility=%d latency=%.3f",
+        state,
+        requester,
+        status,
+        changeReason,
+        channelNumber,
+        countryCode,
+        isHidden,
+        isInfraConnected,
+        isAwdlUp,
+        lowPowerModeDuration,
+        compatibilityMode,
+        requestToUpLatency
+    );
+
+    if (originalSoftApState) {
+        originalSoftApState(
+            self,
+            _cmd,
+            state,
+            requester,
+            status,
+            changeReason,
+            channelNumber,
+            countryCode,
+            isHidden,
+            isInfraConnected,
+            isAwdlUp,
+            lowPowerModeDuration,
+            compatibilityMode,
+            requestToUpLatency
+        );
+    }
+}
+
+static void HookLinkState(
+    id self,
+    SEL _cmd,
+    BOOL linkState,
+    BOOL isInvoluntary,
+    long long linkChangeReason,
+    long long linkChangeSubreason,
+    id networkDetails
+)
+{
+    HPLog(
+        @"LINK state=%d involuntary=%d reason=%lld subreason=%lld details=%@",
+        linkState,
+        isInvoluntary,
+        linkChangeReason,
+        linkChangeSubreason,
+        networkDetails
+    );
+
+    if (originalLinkState) {
+        originalLinkState(
+            self,
+            _cmd,
+            linkState,
+            isInvoluntary,
+            linkChangeReason,
+            linkChangeSubreason,
+            networkDetails
+        );
+    }
+}
+
+static void HookTearDownReason(
+    id self,
+    SEL _cmd,
+    id reason
+)
+{
+    HPLog(
+        @"TEARDOWN reason=%@",
+        reason
+    );
+
+    if (originalTearDownReason) {
+        originalTearDownReason(
+            self,
+            _cmd,
+            reason
+        );
+    }
+}
+
+#pragma mark - Safe hook installer
+
+static BOOL InstallHook(
+    NSString *className,
+    NSString *selectorName,
+    const char *expectedEncoding,
+    IMP replacement,
+    IMP *original
+)
 {
     Class cls =
-        objc_getClass("WiFiUsageSoftApSession");
+        objc_getClass(className.UTF8String);
 
     if (!cls) {
-        LogLine(@"CLIENT HOOK CLASS NOT FOUND");
-        return;
+        HPLog(
+            @"ERROR class not found: %@",
+            className
+        );
+        return NO;
     }
 
     SEL sel =
-        NSSelectorFromString(
-            @"addSoftApClientEvent:identifier:isAppleClient:isInstantHotspot:isAutoHotspot:isHidden:"
-        );
+        NSSelectorFromString(selectorName);
 
     Method method =
         class_getInstanceMethod(cls, sel);
 
     if (!method) {
-        LogLine(@"CLIENT HOOK METHOD NOT FOUND");
-        return;
+        HPLog(
+            @"ERROR method not found: %@ %@",
+            className,
+            selectorName
+        );
+        return NO;
     }
 
     const char *encoding =
         method_getTypeEncoding(method);
 
-    const char *expected =
-        "v44@0:8B16@20B28B32B36B40";
-
     if (!encoding ||
-        strcmp(encoding, expected) != 0) {
+        strcmp(encoding, expectedEncoding) != 0) {
 
-        LogLine(
-            @"CLIENT HOOK SAFETY STOP encoding=%s",
-            encoding ? encoding : "(null)"
+        HPLog(
+            @"SAFETY STOP %@ encoding=%s expected=%s",
+            selectorName,
+            encoding ? encoding : "(null)",
+            expectedEncoding
         );
 
-        return;
+        return NO;
     }
 
     IMP oldImp =
         method_setImplementation(
             method,
-            (IMP)HookSoftApClientEvent
+            replacement
         );
 
     if (!oldImp) {
-        LogLine(@"CLIENT HOOK INSTALL FAILED");
-        return;
+        HPLog(
+            @"ERROR hook failed: %@",
+            selectorName
+        );
+        return NO;
     }
 
-    originalSoftApClientEvent =
-        (SoftApClientEventFn)oldImp;
+    *original = oldImp;
 
-    LogLine(@"CLIENT HOOK INSTALLED");
+    HPLog(
+        @"HOOK INSTALLED: %@",
+        selectorName
+    );
+
+    return YES;
 }
+
+#pragma mark - Init
 
 __attribute__((constructor))
 static void HotspotDiagInit(void)
@@ -243,50 +336,47 @@ static void HotspotDiagInit(void)
         if (![process isEqualToString:@"wifid"])
             return;
 
-        LogLine(
+        HPLog(
             @"=================================================="
         );
 
-        LogLine(
-            @"HotspotDiag START pid=%d",
+        HPLog(
+            @"HotspotDiag V2 START pid=%d",
             getpid()
         );
 
-        /*
-         Stable V5 logger
-        */
-        InstallSafeClientHook();
-
-        /*
-         Only READ the signatures below.
-         No hooks are installed on these methods.
-        */
-
-        DumpMethod(
+        InstallHook(
             @"WiFiUsageSoftApSession",
-            @"softApStateDidChange:requester:status:changeReason:channelNumber:countryCode:isHidden:isInfraConnected:isAwdlUp:lowPowerModeDuration:compatibilityMode:requestToUpLatency:"
+            @"addSoftApClientEvent:identifier:isAppleClient:isInstantHotspot:isAutoHotspot:isHidden:",
+            "v44@0:8B16@20B28B32B36B40",
+            (IMP)HookClientEvent,
+            (IMP *)&originalClientEvent
         );
 
-        DumpMethod(
-            @"WiFiUsageMonitor",
-            @"setSoftApState:requester:status:changeReason:channelNumber:countryCode:isHidden:isInfraConnected:isAwdlUp:lowPowerModeDuration:compatibilityMode:requestToUpLatency:"
-        );
-
-        DumpMethod(
+        InstallHook(
             @"WiFiUsageSoftApSession",
-            @"linkStateDidChange:isInvoluntary:linkChangeReason:linkChangeSubreason:withNetworkDetails:"
+            @"softApStateDidChange:requester:status:changeReason:channelNumber:countryCode:isHidden:isInfraConnected:isAwdlUp:lowPowerModeDuration:compatibilityMode:requestToUpLatency:",
+            "v92@0:8B16@20@28@36Q44Q52B60B64B68d72B80d84",
+            (IMP)HookSoftApState,
+            (IMP *)&originalSoftApState
         );
 
-        DumpMethod(
-            @"WiFiUsageMonitor",
-            @"setLinkEvent:isInvoluntary:linkChangeReason:linkChangeSubreason:withNetworkDetails:forInterface:"
-        );
-
-        DumpMethod(
+        InstallHook(
             @"WiFiUsageSoftApSession",
-            @"setTearDownReason:"
+            @"linkStateDidChange:isInvoluntary:linkChangeReason:linkChangeSubreason:withNetworkDetails:",
+            "v48@0:8B16B20q24q32@40",
+            (IMP)HookLinkState,
+            (IMP *)&originalLinkState
         );
 
-        LogLine(@"[INIT COMPLETE]");
+        InstallHook(
+            @"WiFiUsageSoftApSession",
+            @"setTearDownReason:",
+            "v24@0:8@16",
+            (IMP)HookTearDownReason,
+            (IMP *)&originalTearDownReason
+        );
+
+        HPLog(@"HotspotDiag V2 READY");
     }
 }
