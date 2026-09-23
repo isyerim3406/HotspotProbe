@@ -2,77 +2,122 @@
 #import <objc/runtime.h>
 #import <unistd.h>
 #import <stdio.h>
-#import <stdarg.h>
-#import <string.h>
 
-typedef void (*SoftApClientEventFn)(
-    id,
-    SEL,
-    BOOL,
-    id,
-    BOOL,
-    BOOL,
-    BOOL,
-    BOOL
-);
-
-static SoftApClientEventFn originalSoftApClientEvent = NULL;
-
-static void HPLog(NSString *format, ...)
+static FILE *OpenLog(void)
 {
-    FILE *f = fopen("/tmp/HotspotProbeV7.log", "a");
+    FILE *f = fopen("/tmp/HotspotProbeV8.log", "a");
 
     if (!f)
-        f = fopen("/var/tmp/HotspotProbeV7.log", "a");
+        f = fopen("/var/tmp/HotspotProbeV8.log", "a");
 
-    if (!f)
+    return f;
+}
+
+static void LogLine(FILE *f, NSString *line)
+{
+    if (!f || !line)
         return;
-
-    va_list args;
-    va_start(args, format);
-
-    NSString *line =
-        [[NSString alloc] initWithFormat:format
-                              arguments:args];
-
-    va_end(args);
 
     fprintf(f, "%s\n", line.UTF8String);
     fflush(f);
-    fclose(f);
 }
 
-static void HookSoftApClientEvent(
-    id self,
-    SEL _cmd,
-    BOOL event,
-    id identifier,
-    BOOL isAppleClient,
-    BOOL isInstantHotspot,
-    BOOL isAutoHotspot,
-    BOOL isHidden
+static void DumpMethod(
+    FILE *f,
+    NSString *className,
+    NSString *selectorName
 )
 {
-    HPLog(
-        @"EVENT=%d identifier=%@ RECEIVED Apple=%d InstantHS=%d AutoHS=%d Hidden=%d -> PASS InstantHS=0",
-        event,
-        identifier,
-        isAppleClient,
-        isInstantHotspot,
-        isAutoHotspot,
-        isHidden
+    Class cls = objc_getClass(className.UTF8String);
+
+    if (!cls) {
+        LogLine(
+            f,
+            [NSString stringWithFormat:
+             @"CLASS NOT FOUND: %@",
+             className]
+        );
+        return;
+    }
+
+    SEL sel = NSSelectorFromString(selectorName);
+
+    Method method =
+        class_getInstanceMethod(cls, sel);
+
+    if (!method) {
+        LogLine(
+            f,
+            [NSString stringWithFormat:
+             @"METHOD NOT FOUND: -[%@ %@]",
+             className,
+             selectorName]
+        );
+        return;
+    }
+
+    const char *encoding =
+        method_getTypeEncoding(method);
+
+    unsigned int count =
+        method_getNumberOfArguments(method);
+
+    LogLine(f, @"========================================");
+
+    LogLine(
+        f,
+        [NSString stringWithFormat:
+         @"METHOD: -[%@ %@]",
+         className,
+         selectorName]
     );
 
-    if (originalSoftApClientEvent) {
-        originalSoftApClientEvent(
-            self,
-            _cmd,
-            event,
-            identifier,
-            isAppleClient,
-            NO,
-            isAutoHotspot,
-            isHidden
+    LogLine(
+        f,
+        [NSString stringWithFormat:
+         @"ENCODING: %s",
+         encoding ? encoding : "(null)"]
+    );
+
+    LogLine(
+        f,
+        [NSString stringWithFormat:
+         @"ARGUMENT COUNT: %u",
+         count]
+    );
+
+    char returnType[256] = {0};
+
+    method_getReturnType(
+        method,
+        returnType,
+        sizeof(returnType)
+    );
+
+    LogLine(
+        f,
+        [NSString stringWithFormat:
+         @"RETURN: %s",
+         returnType]
+    );
+
+    for (unsigned int i = 0; i < count; i++) {
+
+        char type[256] = {0};
+
+        method_getArgumentType(
+            method,
+            i,
+            type,
+            sizeof(type)
+        );
+
+        LogLine(
+            f,
+            [NSString stringWithFormat:
+             @"ARG %u: %s",
+             i,
+             type]
         );
     }
 }
@@ -88,64 +133,26 @@ static void HotspotProbeInit(void)
         if (![process isEqualToString:@"wifid"])
             return;
 
-        HPLog(
-            @"===== HotspotProbe V7 FORCE-INSTANT-OFF pid=%d =====",
-            getpid()
+        FILE *f = OpenLog();
+
+        if (!f)
+            return;
+
+        LogLine(
+            f,
+            [NSString stringWithFormat:
+             @"===== HotspotProbe V8 pid=%d =====",
+             getpid()]
         );
 
-        Class cls =
-            objc_getClass("WiFiUsageSoftApSession");
-
-        if (!cls) {
-            HPLog(@"ERROR: class not found");
-            return;
-        }
-
-        SEL sel =
-            NSSelectorFromString(
-                @"addSoftApClientEvent:identifier:isAppleClient:isInstantHotspot:isAutoHotspot:isHidden:"
-            );
-
-        Method method =
-            class_getInstanceMethod(cls, sel);
-
-        if (!method) {
-            HPLog(@"ERROR: method not found");
-            return;
-        }
-
-        const char *encoding =
-            method_getTypeEncoding(method);
-
-        HPLog(
-            @"Encoding=%s",
-            encoding ? encoding : "(null)"
+        DumpMethod(
+            f,
+            @"WiFiUsageSoftApSession",
+            @"softApStateDidChange:requester:status:changeReason:channelNumber:countryCode:isHidden:isInfraConnected:isAwdlUp:lowPowerModeDuration:compatibilityMode:requestToUpLatency:"
         );
 
-        const char *expected =
-            "v44@0:8B16@20B28B32B36B40";
+        LogLine(f, @"[END]");
 
-        if (!encoding ||
-            strcmp(encoding, expected) != 0) {
-
-            HPLog(@"SAFETY STOP: encoding mismatch");
-            return;
-        }
-
-        IMP oldImplementation =
-            method_setImplementation(
-                method,
-                (IMP)HookSoftApClientEvent
-            );
-
-        if (!oldImplementation) {
-            HPLog(@"ERROR: method_setImplementation failed");
-            return;
-        }
-
-        originalSoftApClientEvent =
-            (SoftApClientEventFn)oldImplementation;
-
-        HPLog(@"V7 HOOK INSTALLED - InstantHS forced to 0");
+        fclose(f);
     }
 }
