@@ -1,8 +1,8 @@
 Package: com.chatin.hotspotprobe
 Name: HotspotProbe
-Version: 0.5.0
+Version: 0.7.0
 Architecture: iphoneos-arm64
-Description: Diagnostic probe for Personal Hotspot / HostAP related classes and methods on iOS 15.
+Description: Test forcing Instant Hotspot client flag off.
 Maintainer: Chatin
 Author: Chatin
 Section: Tweaks
