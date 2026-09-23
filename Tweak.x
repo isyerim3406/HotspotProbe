@@ -1,158 +1,155 @@
 #import <Foundation/Foundation.h>
 #import <objc/runtime.h>
+#import <substrate.h>
 #import <unistd.h>
 #import <stdio.h>
+#import <stdarg.h>
 
-static FILE *OpenLog(void) {
-    FILE *f = fopen("/tmp/HotspotProbeTypes.log", "a");
+static FILE *HPLogFile(void) {
+    static FILE *f = NULL;
+
     if (!f)
-        f = fopen("/var/tmp/HotspotProbeTypes.log", "a");
+        f = fopen("/tmp/HotspotProbeV4.log", "a");
+
+    if (!f)
+        f = fopen("/var/tmp/HotspotProbeV4.log", "a");
+
     return f;
 }
 
-static void LogLine(FILE *f, NSString *s) {
-    if (!f || !s) return;
-    fprintf(f, "%s\n", s.UTF8String);
+static void HPLog(NSString *format, ...) {
+    FILE *f = HPLogFile();
+
+    if (!f)
+        return;
+
+    va_list args;
+    va_start(args, format);
+
+    NSString *line =
+        [[NSString alloc] initWithFormat:format
+                              arguments:args];
+
+    va_end(args);
+
+    fprintf(
+        f,
+        "%s\n",
+        line.UTF8String
+    );
+
     fflush(f);
 }
 
-static void DumpMethod(FILE *f, NSString *className, NSString *selectorName) {
-    Class cls = objc_getClass(className.UTF8String);
 
-    if (!cls) {
-        LogLine(f, [NSString stringWithFormat:@"CLASS NOT FOUND: %@", className]);
-        return;
-    }
+/*
+ Real encoding:
 
-    SEL sel = NSSelectorFromString(selectorName);
-    Method method = class_getInstanceMethod(cls, sel);
+ v44@0:8B16@20B28B32B36B40
 
-    if (!method) {
-        LogLine(
-            f,
-            [NSString stringWithFormat:
-                @"METHOD NOT FOUND: -[%@ %@]",
-                className,
-                selectorName
-            ]
-        );
-        return;
-    }
+ self        @
+ _cmd        :
+ event       BOOL
+ identifier  id
+ Apple       BOOL
+ InstantHS   BOOL
+ AutoHS      BOOL
+ Hidden      BOOL
+*/
 
-    const char *types = method_getTypeEncoding(method);
-    unsigned int argc = method_getNumberOfArguments(method);
+static void (*orig_addSoftApClientEvent)(
+    id,
+    SEL,
+    BOOL,
+    id,
+    BOOL,
+    BOOL,
+    BOOL,
+    BOOL
+);
 
-    LogLine(f, @"--------------------------------------------------");
-    LogLine(
-        f,
-        [NSString stringWithFormat:
-            @"METHOD: -[%@ %@]",
-            className,
-            selectorName
-        ]
+static void hook_addSoftApClientEvent(
+    id self,
+    SEL _cmd,
+    BOOL event,
+    id identifier,
+    BOOL isAppleClient,
+    BOOL isInstantHotspot,
+    BOOL isAutoHotspot,
+    BOOL isHidden
+) {
+
+    HPLog(
+        @"EVENT=%d identifier=%@ Apple=%d InstantHS=%d AutoHS=%d Hidden=%d",
+        event,
+        identifier,
+        isAppleClient,
+        isInstantHotspot,
+        isAutoHotspot,
+        isHidden
     );
 
-    LogLine(
-        f,
-        [NSString stringWithFormat:
-            @"TYPE ENCODING: %s",
-            types ? types : "?"
-        ]
+    orig_addSoftApClientEvent(
+        self,
+        _cmd,
+        event,
+        identifier,
+        isAppleClient,
+        isInstantHotspot,
+        isAutoHotspot,
+        isHidden
     );
-
-    LogLine(
-        f,
-        [NSString stringWithFormat:
-            @"ARGUMENT COUNT: %u",
-            argc
-        ]
-    );
-
-    char returnType[256] = {0};
-    method_getReturnType(method, returnType, sizeof(returnType));
-
-    LogLine(
-        f,
-        [NSString stringWithFormat:
-            @"RETURN TYPE: %s",
-            returnType
-        ]
-    );
-
-    for (unsigned int i = 0; i < argc; i++) {
-        char argType[256] = {0};
-
-        method_getArgumentType(
-            method,
-            i,
-            argType,
-            sizeof(argType)
-        );
-
-        LogLine(
-            f,
-            [NSString stringWithFormat:
-                @"ARG %u TYPE: %s",
-                i,
-                argType
-            ]
-        );
-    }
 }
 
 __attribute__((constructor))
-static void InitHotspotProbeTypes(void) {
+static void HPInit(void) {
+
     @autoreleasepool {
 
         NSString *process =
             [NSProcessInfo processInfo].processName;
 
-        if (![process isEqualToString:@"wifid"]) {
+        if (![process isEqualToString:@"wifid"])
+            return;
+
+        HPLog(
+            @"HotspotProbe V4 START pid=%d",
+            getpid()
+        );
+
+        Class cls =
+            objc_getClass("WiFiUsageSoftApSession");
+
+        if (!cls) {
+            HPLog(@"CLASS NOT FOUND");
             return;
         }
 
-        FILE *f = OpenLog();
+        SEL sel =
+            NSSelectorFromString(
+                @"addSoftApClientEvent:identifier:isAppleClient:isInstantHotspot:isAutoHotspot:isHidden:"
+            );
 
-        if (!f)
+        Method method =
+            class_getInstanceMethod(cls, sel);
+
+        if (!method) {
+            HPLog(@"METHOD NOT FOUND");
             return;
+        }
 
-        LogLine(f, @"");
-        LogLine(f, @"==================================================");
-        LogLine(
-            f,
-            [NSString stringWithFormat:
-                @"HotspotProbe Types started process=%@ pid=%d",
-                process,
-                getpid()
-            ]
-        );
-        LogLine(f, @"==================================================");
-
-        DumpMethod(
-            f,
-            @"WiFiUsageSoftApSession",
-            @"addSoftApClientEvent:identifier:isAppleClient:isInstantHotspot:isAutoHotspot:isHidden:"
+        HPLog(
+            @"METHOD FOUND encoding=%s",
+            method_getTypeEncoding(method)
         );
 
-        DumpMethod(
-            f,
-            @"AWDWiFiSoftAPClient",
-            @"setSwitchedToAnotherNetwork:"
+        MSHookMessageEx(
+            cls,
+            sel,
+            (IMP)hook_addSoftApClientEvent,
+            (IMP *)&orig_addSoftApClientEvent
         );
 
-        DumpMethod(
-            f,
-            @"AWDWiFiSoftAPClient",
-            @"setJoinedByAutoHS:"
-        );
-
-        DumpMethod(
-            f,
-            @"AWDWiFiSoftAPClient",
-            @"setFamilyDevice:"
-        );
-
-        LogLine(f, @"[END]");
-        fclose(f);
+        HPLog(@"HOOK INSTALLED");
     }
 }
