@@ -1,232 +1,324 @@
 #import <Foundation/Foundation.h>
 #import <objc/runtime.h>
-#import <mach-o/dyld.h>
+#import <substrate.h>
 #import <unistd.h>
 #import <stdio.h>
+#import <stdarg.h>
 
-static FILE *HPOpenLog(void) {
-    const char *paths[] = {
-        "/tmp/HotspotProbe.log",
-        "/var/tmp/HotspotProbe.log",
-        "/var/mobile/HotspotProbe.log"
-    };
+static FILE *HPLogFile(void) {
+    static FILE *f = NULL;
 
-    for (unsigned int i = 0;
-         i < sizeof(paths) / sizeof(paths[0]);
-         i++) {
+    if (!f) {
+        f = fopen("/tmp/HotspotProbeV2.log", "a");
 
-        FILE *f = fopen(paths[i], "a");
-
-        if (f) {
-            fprintf(f, "LOGPATH=%s\n", paths[i]);
-            fflush(f);
-            return f;
-        }
+        if (!f)
+            f = fopen("/var/tmp/HotspotProbeV2.log", "a");
     }
 
-    return NULL;
+    return f;
 }
 
-static BOOL HPContainsInterestingText(NSString *text) {
-    if (!text)
-        return NO;
-
-    NSString *s = [text lowercaseString];
-
-    NSArray<NSString *> *keys = @[
-        @"hotspot",
-        @"hostap",
-        @"tether",
-        @"internetsharing",
-        @"mobileinternetsharing",
-        @"beacon",
-        @"vendor",
-        @"informationelement",
-        @"80211",
-        @"wifi",
-        @"wireless",
-        @"personalhotspot"
-    ];
-
-    for (NSString *key in keys) {
-        if ([s containsString:key])
-            return YES;
-    }
-
-    return NO;
-}
-
-static void HPWriteLine(FILE *f, NSString *line) {
-    if (!f || !line)
+static void HPLog(NSString *format, ...) {
+    FILE *f = HPLogFile();
+    if (!f)
         return;
 
-    fprintf(f, "%s\n", line.UTF8String);
+    va_list args;
+    va_start(args, format);
+
+    NSString *line =
+        [[NSString alloc] initWithFormat:format
+                              arguments:args];
+
+    va_end(args);
+
+    NSDateFormatter *df = [NSDateFormatter new];
+    df.locale =
+        [NSLocale localeWithLocaleIdentifier:@"en_US_POSIX"];
+
+    df.dateFormat = @"HH:mm:ss.SSS";
+
+    NSString *time =
+        [df stringFromDate:[NSDate date]];
+
+    fprintf(
+        f,
+        "[%s] %s\n",
+        time.UTF8String,
+        line.UTF8String
+    );
+
     fflush(f);
 }
 
+
+/*
+ --------------------------------------------------------
+ WiFiUsageSoftApSession
+ --------------------------------------------------------
+*/
+
+static void (*orig_addSoftApClientEvent)(
+    id,
+    SEL,
+    id,
+    id,
+    BOOL,
+    BOOL,
+    BOOL,
+    BOOL
+);
+
+static void hook_addSoftApClientEvent(
+    id self,
+    SEL _cmd,
+    id event,
+    id identifier,
+    BOOL isAppleClient,
+    BOOL isInstantHotspot,
+    BOOL isAutoHotspot,
+    BOOL isHidden
+) {
+
+    HPLog(
+        @"CLIENT EVENT "
+         "event=%@ "
+         "identifier=%@ "
+         "Apple=%d "
+         "InstantHS=%d "
+         "AutoHS=%d "
+         "Hidden=%d",
+        event,
+        identifier,
+        isAppleClient,
+        isInstantHotspot,
+        isAutoHotspot,
+        isHidden
+    );
+
+    orig_addSoftApClientEvent(
+        self,
+        _cmd,
+        event,
+        identifier,
+        isAppleClient,
+        isInstantHotspot,
+        isAutoHotspot,
+        isHidden
+    );
+}
+
+
+/*
+ --------------------------------------------------------
+ AWDWiFiSoftAPClient
+ --------------------------------------------------------
+*/
+
+static void (*orig_setSwitchedToAnotherNetwork)(
+    id,
+    SEL,
+    BOOL
+);
+
+static void hook_setSwitchedToAnotherNetwork(
+    id self,
+    SEL _cmd,
+    BOOL value
+) {
+
+    HPLog(
+        @"AWD setSwitchedToAnotherNetwork=%d object=%@",
+        value,
+        self
+    );
+
+    orig_setSwitchedToAnotherNetwork(
+        self,
+        _cmd,
+        value
+    );
+}
+
+
+static void (*orig_setJoinedByAutoHS)(
+    id,
+    SEL,
+    BOOL
+);
+
+static void hook_setJoinedByAutoHS(
+    id self,
+    SEL _cmd,
+    BOOL value
+) {
+
+    HPLog(
+        @"AWD setJoinedByAutoHS=%d object=%@",
+        value,
+        self
+    );
+
+    orig_setJoinedByAutoHS(
+        self,
+        _cmd,
+        value
+    );
+}
+
+
+static void (*orig_setFamilyDevice)(
+    id,
+    SEL,
+    BOOL
+);
+
+static void hook_setFamilyDevice(
+    id self,
+    SEL _cmd,
+    BOOL value
+) {
+
+    HPLog(
+        @"AWD setFamilyDevice=%d object=%@",
+        value,
+        self
+    );
+
+    orig_setFamilyDevice(
+        self,
+        _cmd,
+        value
+    );
+}
+
+
+/*
+ --------------------------------------------------------
+ Helper
+ --------------------------------------------------------
+*/
+
+static void HPHook(
+    NSString *className,
+    NSString *selectorName,
+    IMP replacement,
+    IMP *original
+) {
+
+    Class cls =
+        objc_getClass(className.UTF8String);
+
+    if (!cls) {
+        HPLog(
+            @"CLASS NOT FOUND: %@",
+            className
+        );
+        return;
+    }
+
+    SEL sel =
+        NSSelectorFromString(selectorName);
+
+    Method method =
+        class_getInstanceMethod(cls, sel);
+
+    if (!method) {
+        HPLog(
+            @"METHOD NOT FOUND: -[%@ %@]",
+            className,
+            selectorName
+        );
+        return;
+    }
+
+    const char *types =
+        method_getTypeEncoding(method);
+
+    HPLog(
+        @"HOOKING -[%@ %@] types=%s",
+        className,
+        selectorName,
+        types ? types : "?"
+    );
+
+    MSHookMessageEx(
+        cls,
+        sel,
+        replacement,
+        original
+    );
+}
+
+
+/*
+ --------------------------------------------------------
+ Init
+ --------------------------------------------------------
+*/
+
 __attribute__((constructor))
 static void HPInit(void) {
+
     @autoreleasepool {
 
-        NSString *proc =
-            [NSProcessInfo processInfo].processName ?: @"unknown";
+        NSString *process =
+            [NSProcessInfo processInfo].processName;
 
-        if (!([proc isEqualToString:@"misd"] ||
-              [proc isEqualToString:@"sharingd"] ||
-              [proc isEqualToString:@"wifid"])) {
+        if (![process isEqualToString:@"wifid"]) {
             return;
         }
 
-        FILE *f = HPOpenLog();
-
-        if (!f)
-            return;
-
-        HPWriteLine(f, @"");
-        HPWriteLine(
-            f,
-            @"============================================================"
+        HPLog(
+            @"=============================="
         );
 
-        HPWriteLine(
-            f,
-            [NSString stringWithFormat:
-                @"PROCESS=%@ PID=%d",
-                proc,
-                getpid()]
+        HPLog(
+            @"HotspotProbe V2 started "
+             "process=%@ pid=%d",
+            process,
+            getpid()
         );
 
-        HPWriteLine(
-            f,
-            @"============================================================"
+        HPLog(
+            @"=============================="
         );
 
-        HPWriteLine(f, @"[LOADED IMAGES]");
 
-        uint32_t imageCount = _dyld_image_count();
-
-        for (uint32_t i = 0; i < imageCount; i++) {
-            const char *name = _dyld_get_image_name(i);
-
-            if (!name)
-                continue;
-
-            NSString *path =
-                [NSString stringWithUTF8String:name];
-
-            if (HPContainsInterestingText(path)) {
-                HPWriteLine(f, path);
-            }
-        }
-
-        HPWriteLine(
-            f,
-            @"[INTERESTING OBJC CLASSES / METHODS]"
+        HPHook(
+            @"WiFiUsageSoftApSession",
+            @"addSoftApClientEvent:identifier:isAppleClient:isInstantHotspot:isAutoHotspot:isHidden:",
+            (IMP)hook_addSoftApClientEvent,
+            (IMP *)&orig_addSoftApClientEvent
         );
 
-        unsigned int classCount = 0;
 
-        Class *classes =
-            objc_copyClassList(&classCount);
+        HPHook(
+            @"AWDWiFiSoftAPClient",
+            @"setSwitchedToAnotherNetwork:",
+            (IMP)hook_setSwitchedToAnotherNetwork,
+            (IMP *)&orig_setSwitchedToAnotherNetwork
+        );
 
-        if (!classes) {
-            HPWriteLine(
-                f,
-                @"objc_copyClassList failed"
-            );
 
-            fclose(f);
-            return;
-        }
+        HPHook(
+            @"AWDWiFiSoftAPClient",
+            @"setJoinedByAutoHS:",
+            (IMP)hook_setJoinedByAutoHS,
+            (IMP *)&orig_setJoinedByAutoHS
+        );
 
-        for (unsigned int i = 0;
-             i < classCount;
-             i++) {
 
-            Class cls = classes[i];
+        HPHook(
+            @"AWDWiFiSoftAPClient",
+            @"setFamilyDevice:",
+            (IMP)hook_setFamilyDevice,
+            (IMP *)&orig_setFamilyDevice
+        );
 
-            NSString *className =
-                NSStringFromClass(cls);
 
-            BOOL classHit =
-                HPContainsInterestingText(className);
-
-            unsigned int methodCount = 0;
-
-            Method *methods =
-                class_copyMethodList(
-                    cls,
-                    &methodCount
-                );
-
-            for (unsigned int m = 0;
-                 m < methodCount;
-                 m++) {
-
-                SEL sel =
-                    method_getName(methods[m]);
-
-                NSString *methodName =
-                    NSStringFromSelector(sel);
-
-                if (classHit ||
-                    HPContainsInterestingText(methodName)) {
-
-                    HPWriteLine(
-                        f,
-                        [NSString stringWithFormat:
-                            @"-[%@ %@]",
-                            className,
-                            methodName]
-                    );
-                }
-            }
-
-            if (methods)
-                free(methods);
-
-            Class meta =
-                object_getClass(cls);
-
-            methodCount = 0;
-
-            methods =
-                class_copyMethodList(
-                    meta,
-                    &methodCount
-                );
-
-            for (unsigned int m = 0;
-                 m < methodCount;
-                 m++) {
-
-                SEL sel =
-                    method_getName(methods[m]);
-
-                NSString *methodName =
-                    NSStringFromSelector(sel);
-
-                if (classHit ||
-                    HPContainsInterestingText(methodName)) {
-
-                    HPWriteLine(
-                        f,
-                        [NSString stringWithFormat:
-                            @"+[%@ %@]",
-                            className,
-                            methodName]
-                    );
-                }
-            }
-
-            if (methods)
-                free(methods);
-        }
-
-        free(classes);
-
-        HPWriteLine(f, @"[END]");
-
-        fclose(f);
+        HPLog(
+            @"HotspotProbe V2 hooks installed"
+        );
     }
 }
