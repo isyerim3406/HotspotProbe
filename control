@@ -1,5 +1,5 @@
-Package: com.chatin.hotspotdiag
-Name: HotspotDiag
+Package: com.chatin.hotspotprobe
+Name: HotspotProbe
 Version: 1.0.0
 Architecture: iphoneos-arm64
 Description: Safe diagnostic logger for Personal Hotspot disconnect investigation.
