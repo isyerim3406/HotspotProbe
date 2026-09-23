@@ -1,0 +1,9 @@
+{
+    Filter = {
+        Executables = (
+            "misd",
+            "sharingd",
+            "wifid"
+        );
+    };
+}
