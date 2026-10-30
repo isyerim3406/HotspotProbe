@@ -1,0 +1,67 @@
+name: Build iOSProxy rootless DEB
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'iosproxy/**'
+      - '.github/workflows/build-iosproxy.yml'
+jobs:
+  deb:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Assemble rootless package
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p pkg/DEBIAN pkg/var/jb/usr/libexec/iosproxy pkg/var/jb/Library/LaunchDaemons
+          cp iosproxy/server.py pkg/var/jb/usr/libexec/iosproxy/server.py
+          cat > pkg/DEBIAN/control <<'EOF'
+          Package: com.chatin.iosproxy
+          Name: iOS Proxy Server
+          Version: 0.1.0
+          Architecture: iphoneos-arm64
+          Maintainer: Chatin
+          Description: Rootless HTTP and SOCKS5 proxy, without Apple hotspot hooks.
+          Section: Networking
+          Depends: python3
+          EOF
+          cat > pkg/var/jb/Library/LaunchDaemons/com.chatin.iosproxy.plist <<'EOF'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0"><dict>
+          <key>Label</key><string>com.chatin.iosproxy</string>
+          <key>ProgramArguments</key><array>
+          <string>/var/jb/usr/bin/python3</string>
+          <string>/var/jb/usr/libexec/iosproxy/server.py</string>
+          </array>
+          <key>RunAtLoad</key><true/>
+          <key>KeepAlive</key><true/>
+          <key>StandardOutPath</key><string>/var/mobile/iosproxy.log</string>
+          <key>StandardErrorPath</key><string>/var/mobile/iosproxy.err</string>
+          </dict></plist>
+          EOF
+          cat > pkg/DEBIAN/postinst <<'EOF'
+          #!/bin/sh
+          if command -v launchctl >/dev/null 2>&1; then
+            launchctl bootstrap system /var/jb/Library/LaunchDaemons/com.chatin.iosproxy.plist 2>/dev/null || true
+            launchctl kickstart -k system/com.chatin.iosproxy 2>/dev/null || true
+          fi
+          exit 0
+          EOF
+          cat > pkg/DEBIAN/prerm <<'EOF'
+          #!/bin/sh
+          if command -v launchctl >/dev/null 2>&1; then
+            launchctl bootout system/com.chatin.iosproxy 2>/dev/null || true
+          fi
+          exit 0
+          EOF
+          chmod 755 pkg/DEBIAN pkg/DEBIAN/postinst pkg/DEBIAN/prerm pkg/var/jb/usr/libexec/iosproxy/server.py
+          python3 -m py_compile iosproxy/server.py
+          dpkg-deb --build --root-owner-group pkg com.chatin.iosproxy_0.1.0_iphoneos-arm64.deb
+          dpkg-deb --info com.chatin.iosproxy_0.1.0_iphoneos-arm64.deb
+      - uses: actions/upload-artifact@v4
+        with:
+          name: iOSProxy-rootless-DEB
+          path: '*.deb'
+          if-no-files-found: error
