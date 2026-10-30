@@ -1,8 +1,8 @@
 Package: com.chatin.hotspotprobe
 Name: HotspotProbe
-Version: 1.3.0
+Version: 1.4.0
 Architecture: iphoneos-arm64
-Description: Passive WiFi SoftAP disconnect diagnostics for iOS 15 rootless.
+Description: Experimental InstantHS callback flag suppression for iOS 15 rootless.
 Maintainer: Chatin
 Author: Chatin
 Section: Tweaks
