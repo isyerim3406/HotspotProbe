@@ -4,6 +4,7 @@
 #import <stdio.h>
 #import <stdarg.h>
 #import <string.h>
+#import <sys/stat.h>
 
 #pragma mark - Function types
 
@@ -128,6 +129,8 @@ static void HookClientEvent(
         isHidden
     );
 
+    HPLog(@"CLIENT_TRANSITION %@ (server-side observed, not 802.11 disconnect reason)", event ? @"JOIN" : @"LEAVE");
+
     if (originalClientEvent) {
         originalClientEvent(
             self,
@@ -174,6 +177,8 @@ static void HookSoftApState(
         compatibilityMode,
         requestToUpLatency
     );
+
+    if (!state) HPLog(@"SOFTAP_STOP_OBSERVED requester=%@ reason=%@ status=%@ (initiator not established)", requester, changeReason, status);
 
     if (originalSoftApState) {
         originalSoftApState(
@@ -237,6 +242,8 @@ static void HookTearDownReason(
         @"TEARDOWN reason=%@",
         reason
     );
+
+    HPLog(@"TEARDOWN_OBSERVED reason=%@ (server callback, not proof of client power saving)", reason);
 
     if (originalTearDownReason) {
         originalTearDownReason(
@@ -341,7 +348,7 @@ static void HotspotDiagInit(void)
         );
 
         HPLog(
-            @"HotspotProbe 1.2.0 START pid=%d",
+            @"HotspotProbe 1.3.0 START pid=%d",
             getpid()
         );
         HPLog(@"PASSIVE DIAGNOSTICS ONLY: no beacon, NAT, power or SoftAP changes");
@@ -378,6 +385,6 @@ static void HotspotDiagInit(void)
             (IMP *)&originalTearDownReason
         );
 
-        HPLog(@"HotspotProbe 1.2.0 READY");
+        HPLog(@"HotspotProbe 1.3.0 READY");
     }
 }
