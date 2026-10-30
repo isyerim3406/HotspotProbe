@@ -48,7 +48,7 @@ jobs:
           dpkg-deb --build --root-owner-group stage com.chatin.iosproxy_0.2.0_iphoneos-arm64.deb
           dpkg-deb --info com.chatin.iosproxy_0.2.0_iphoneos-arm64.deb
           dpkg-deb --contents com.chatin.iosproxy_0.2.0_iphoneos-arm64.deb
-          ! dpkg-deb -f com.chatin.iosproxy_0.2.0_iphoneos-arm64.deb Depends
+          test -z "$(dpkg-deb -f com.chatin.iosproxy_0.2.0_iphoneos-arm64.deb Depends)"
       - uses: actions/upload-artifact@v4
         with:
           name: iOSProxy-rootless-DEB-v0.2.0
