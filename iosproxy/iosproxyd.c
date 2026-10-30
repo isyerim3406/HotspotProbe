@@ -229,7 +229,7 @@ static void *panel_server(void *unused) {
     int ls=socket(AF_INET,SOCK_STREAM,0);
     if(ls<0)return NULL;
     int yes=1;setsockopt(ls,SOL_SOCKET,SO_REUSEADDR,&yes,sizeof(yes));
-    struct sockaddr_in a={.sin_family=AF_INET,.sin_port=htons(9878),.sin_addr.s_addr=htonl(INADDR_LOOPBACK)};
+    struct sockaddr_in a={.sin_family=AF_INET,.sin_port=htons(9878),.sin_addr.s_addr=htonl(0x7f000001U)};
     if(bind(ls,(struct sockaddr*)&a,sizeof(a))<0||listen(ls,8)<0){close(ls);return NULL;}
     for(;;){
         int c=accept(ls,NULL,NULL);if(c<0)continue;
