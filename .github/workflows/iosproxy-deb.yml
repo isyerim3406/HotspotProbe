@@ -45,14 +45,14 @@ jobs:
           cp build/iosproxyd stage/var/jb/usr/libexec/iosproxy/iosproxyd
           chmod 755 stage/var/jb/usr/libexec/iosproxy/iosproxyd
           cp iosproxy/launchd.plist stage/var/jb/Library/LaunchDaemons/com.chatin.iosproxy.plist
-          dpkg-deb --build --root-owner-group stage com.chatin.iosproxy_0.2.0_iphoneos-arm64.deb
-          dpkg-deb --info com.chatin.iosproxy_0.2.0_iphoneos-arm64.deb
-          dpkg-deb --contents com.chatin.iosproxy_0.2.0_iphoneos-arm64.deb
-          test -z "$(dpkg-deb -f com.chatin.iosproxy_0.2.0_iphoneos-arm64.deb Depends)"
+          dpkg-deb --build --root-owner-group stage com.chatin.iosproxy_0.3.0_iphoneos-arm64.deb
+          dpkg-deb --info com.chatin.iosproxy_0.3.0_iphoneos-arm64.deb
+          dpkg-deb --contents com.chatin.iosproxy_0.3.0_iphoneos-arm64.deb
+          test -z "$(dpkg-deb -f com.chatin.iosproxy_0.3.0_iphoneos-arm64.deb Depends)"
       - uses: actions/upload-artifact@v4
         with:
-          name: iOSProxy-rootless-DEB-v0.2.0
-          path: com.chatin.iosproxy_0.2.0_iphoneos-arm64.deb
+          name: iOSProxy-rootless-DEB-v0.3.0
+          path: com.chatin.iosproxy_0.3.0_iphoneos-arm64.deb
           if-no-files-found: error
       - name: Publish direct DEB download via GitHub Release
         if: github.ref == 'refs/heads/main'
@@ -61,10 +61,10 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -eux
-          FILE=com.chatin.iosproxy_0.2.0_iphoneos-arm64.deb
-          TAG=iosproxy-v0.2.0
+          FILE=com.chatin.iosproxy_0.3.0_iphoneos-arm64.deb
+          TAG=iosproxy-v0.3.0
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release upload "$TAG" "$FILE" --clobber
           else
-            gh release create "$TAG" "$FILE" --title "iOSProxy v0.2.0 rootless" --notes "Standalone signed iOS ARM64 HTTP/SOCKS5 proxy. Fixes Sileo unmet Python dependency issue from v0.1.0. Does not change hotspot management."
+            gh release create "$TAG" "$FILE" --title "iOSProxy v0.3.0 rootless" --notes "Standalone signed iOS ARM64 HTTP/SOCKS5 proxy. Fixes Sileo unmet Python dependency issue from v0.1.0. Does not change hotspot management."
           fi
