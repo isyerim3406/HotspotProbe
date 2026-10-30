@@ -131,6 +131,10 @@ static void HookClientEvent(
 
     HPLog(@"CLIENT_TRANSITION %@ (server-side observed, not 802.11 disconnect reason)", event ? @"JOIN" : @"LEAVE");
 
+    // Experimental: suppress the Instant Hotspot flag in this server-side callback.
+    // Does NOT alter beacon/probe-response frames on the air.
+    BOOL forwardedInstant = NO;
+    if (isInstantHotspot) HPLog(@"EXPERIMENT normal-client flag: InstantHS 1 -> 0");
     if (originalClientEvent) {
         originalClientEvent(
             self,
@@ -138,7 +142,7 @@ static void HookClientEvent(
             event,
             identifier,
             isAppleClient,
-            isInstantHotspot,
+            forwardedInstant,
             isAutoHotspot,
             isHidden
         );
@@ -348,10 +352,10 @@ static void HotspotDiagInit(void)
         );
 
         HPLog(
-            @"HotspotProbe 1.3.0 START pid=%d",
+            @"HotspotProbe 1.4.0 START pid=%d",
             getpid()
         );
-        HPLog(@"PASSIVE DIAGNOSTICS ONLY: no beacon, NAT, power or SoftAP changes");
+        HPLog(@"EXPERIMENTAL: suppress InstantHS flag in WiFiUsageSoftApSession callback; does NOT rewrite Wi-Fi beacon");
 
         InstallHook(
             @"WiFiUsageSoftApSession",
@@ -385,6 +389,6 @@ static void HotspotDiagInit(void)
             (IMP *)&originalTearDownReason
         );
 
-        HPLog(@"HotspotProbe 1.3.0 READY");
+        HPLog(@"HotspotProbe 1.4.0 READY");
     }
 }
