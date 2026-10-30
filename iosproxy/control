@@ -1,0 +1,8 @@
+Package: com.chatin.iosproxy
+Name: iOS Proxy Server
+Version: 0.1.0
+Architecture: iphoneos-arm64
+Maintainer: Chatin
+Description: Rootless HTTP and SOCKS5 proxy for iOS Personal Hotspot; does not modify Apple tethering services.
+Section: Networking
+Depends: python3

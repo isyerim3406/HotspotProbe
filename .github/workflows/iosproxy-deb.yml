@@ -1,0 +1,34 @@
+name: Build independent iOS SOCKS HTTP proxy DEB
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'iosproxy/**'
+      - '.github/workflows/iosproxy-deb.yml'
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prepare rootless package
+        run: |
+          set -eux
+          mkdir -p stage/DEBIAN stage/var/jb/usr/libexec/iosproxy stage/var/jb/Library/LaunchDaemons
+          cp iosproxy/control stage/DEBIAN/control
+          cp iosproxy/postinst stage/DEBIAN/postinst
+          cp iosproxy/prerm stage/DEBIAN/prerm
+          chmod 755 stage/DEBIAN/postinst stage/DEBIAN/prerm
+          cp iosproxy/server.py stage/var/jb/usr/libexec/iosproxy/server.py
+          chmod 755 stage/var/jb/usr/libexec/iosproxy/server.py
+          cp iosproxy/launchd.plist stage/var/jb/Library/LaunchDaemons/com.chatin.iosproxy.plist
+          python3 -m py_compile iosproxy/server.py
+          dpkg-deb --build --root-owner-group stage com.chatin.iosproxy_0.1.0_iphoneos-arm64.deb
+          dpkg-deb --info com.chatin.iosproxy_0.1.0_iphoneos-arm64.deb
+      - name: Upload DEB
+        uses: actions/upload-artifact@v4
+        with:
+          name: iOSProxy-rootless-DEB
+          path: com.chatin.iosproxy_0.1.0_iphoneos-arm64.deb
+          if-no-files-found: error
