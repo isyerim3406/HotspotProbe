@@ -15,12 +15,16 @@
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <unistd.h>
+#include <time.h>
 #ifndef MSG_NOSIGNAL
 #define MSG_NOSIGNAL 0
 #endif
 #define MAX_HEADERS 32768
 #define BUFSIZE 32768
 typedef struct { int fd; int is_socks; } worker_args;
+static volatile int proxy_enabled=1;
+static volatile unsigned long accepted_clients=0;
+static char panel_token[33];
 static int sendall(int fd,const void *buf,size_t size) {
     const uint8_t *p=buf;
     while(size) {
@@ -190,7 +194,8 @@ static void handle_http(int fd) {
 static void *worker(void *opaque) {
     worker_args *args=opaque;
     int fd=args->fd,is_socks=args->is_socks;free(args);
-    if(!allowed(fd)) {close(fd);return NULL;}
+    if(!allowed(fd)||!proxy_enabled) {close(fd);return NULL;}
+    __sync_fetch_and_add(&accepted_clients,1);
     struct timeval tv={.tv_sec=20};
     setsockopt(fd,SOL_SOCKET,SO_RCVTIMEO,&tv,sizeof(tv));
     if(is_socks) handle_socks(fd);else handle_http(fd);
@@ -218,10 +223,60 @@ static void *listen_port(void *opaque) {
     }
     close(listener);return NULL;
 }
+
+static void *panel_server(void *unused) {
+    (void)unused;
+    int ls=socket(AF_INET,SOCK_STREAM,0);
+    if(ls<0)return NULL;
+    int yes=1;setsockopt(ls,SOL_SOCKET,SO_REUSEADDR,&yes,sizeof(yes));
+    struct sockaddr_in a={.sin_family=AF_INET,.sin_port=htons(9878),.sin_addr.s_addr=htonl(INADDR_LOOPBACK)};
+    if(bind(ls,(struct sockaddr*)&a,sizeof(a))<0||listen(ls,8)<0){close(ls);return NULL;}
+    for(;;){
+        int c=accept(ls,NULL,NULL);if(c<0)continue;
+        struct timeval tv={.tv_sec=3};setsockopt(c,SOL_SOCKET,SO_RCVTIMEO,&tv,sizeof(tv));
+        char req[2048]={0};ssize_t n=recv(c,req,sizeof(req)-1,0);
+        if(n<=0){close(c);continue;}
+        if(strncmp(req,"POST /toggle ",13)==0 && strstr(req,"\r\nOrigin: http://127.0.0.1:9878") && strstr(req,panel_token)){
+            proxy_enabled=!proxy_enabled;
+        }
+        char html[6000];
+        int m=snprintf(html,sizeof(html),
+        "<!doctype html><html lang='tr'><meta name='viewport' content='width=device-width,initial-scale=1'>"
+        "<meta charset='utf-8'><title>iOSProxy</title>"
+        "<style>body{font:17px -apple-system,system-ui;background:#f2f4f8;color:#172236;margin:0;padding:22px}"
+        ".box{background:white;border-radius:18px;padding:20px;max-width:500px;margin:0 auto 18px;box-shadow:0 2px 10px #152b4315}"
+        "h1{font-size:25px}p{line-height:1.5}button{background:#176ef2;color:white;border:0;border-radius:12px;padding:14px 20px;font-size:17px}"
+        ".off{background:#d53b46}.ok{font-weight:bold;color:%s}code{background:#eef2f8;padding:4px;border-radius:6px}"
+        "</style><div class='box'><h1>iOSProxy</h1><p class='ok'>%s</p>"
+        "<p>Sunucu aktif. Proxy bağlantıları: %lu</p>"
+        "<form method='post' action='/toggle'><input type='hidden' name='token' value='%s'>"
+        "<button class='%s'>Proxy'yi %s</button></form></div>"
+        "<div class='box'><h2>iPhone 15 ayarları</h2><p>Wi-Fi &gt; (i) &gt; HTTP Proxy &gt; Elle</p>"
+        "<p>Sunucu: <code>172.20.10.1</code> <button onclick=\"navigator.clipboard.writeText('172.20.10.1')\">Kopyala</button></p>"
+        "<p>Port: <code>9877</code> <button onclick=\"navigator.clipboard.writeText('9877')\">Kopyala</button></p>"
+        "<p>Kimlik doğrulama: Kapalı</p></div>"
+        "<div class='box'><small>Panel sadece bu iPhone'da (127.0.0.1) açılır. Hotspot'u otomatik açmaz ve Wi-Fi uyku davranışını değiştirmez.</small></div></html>",
+        proxy_enabled?"#148b52":"#c63b42",proxy_enabled?"Proxy açık":"Proxy kapalı",
+        accepted_clients,panel_token,proxy_enabled?"off":"",proxy_enabled?"Kapat":"Aç");
+        if(m>0 && (size_t)m<sizeof(html)){
+            char hdr[256];
+            int k=snprintf(hdr,sizeof(hdr),"HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nCache-Control: no-store\r\nX-Frame-Options: DENY\r\nContent-Length: %d\r\nConnection: close\r\n\r\n",m);
+            if(k>0)sendall(c,hdr,(size_t)k);
+            sendall(c,html,(size_t)m);
+        }
+        close(c);
+    }
+}
+
 int main(void) {
     signal(SIGPIPE,SIG_IGN);
+    FILE *random=fopen("/dev/urandom","rb");unsigned char b[16]={0};
+    if(!random||fread(b,1,16,random)!=16){if(random)fclose(random);return 1;}
+    fclose(random);
+    for(int i=0;i<16;i++)snprintf(panel_token+i*2,3,"%02x",b[i]);
     static int socks_port=9876,http_port=9877;
-    pthread_t s,h;
+    pthread_t s,h,p;
+    if(pthread_create(&p,NULL,panel_server,NULL)==0)pthread_detach(p);
     if(pthread_create(&s,NULL,listen_port,&socks_port)!=0) return 1;
     if(pthread_create(&h,NULL,listen_port,&http_port)!=0) return 1;
     pthread_join(s,NULL);pthread_join(h,NULL);return 0;
