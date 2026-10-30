@@ -62,10 +62,10 @@ static SetTearDownReasonFn originalTearDownReason = NULL;
 
 static FILE *OpenLog(void)
 {
-    FILE *f = fopen("/tmp/HotspotDiagV2.log", "a");
+    FILE *f = fopen("/var/mobile/HotspotProbe.log", "a");
 
     if (!f)
-        f = fopen("/var/tmp/HotspotDiagV2.log", "a");
+        f = fopen("/tmp/HotspotDiagV2.log", "a");
 
     return f;
 }
@@ -341,9 +341,10 @@ static void HotspotDiagInit(void)
         );
 
         HPLog(
-            @"HotspotDiag V2 START pid=%d",
+            @"HotspotProbe 1.2.0 START pid=%d",
             getpid()
         );
+        HPLog(@"PASSIVE DIAGNOSTICS ONLY: no beacon, NAT, power or SoftAP changes");
 
         InstallHook(
             @"WiFiUsageSoftApSession",
@@ -377,6 +378,6 @@ static void HotspotDiagInit(void)
             (IMP *)&originalTearDownReason
         );
 
-        HPLog(@"HotspotDiag V2 READY");
+        HPLog(@"HotspotProbe 1.2.0 READY");
     }
 }
