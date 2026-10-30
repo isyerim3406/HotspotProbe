@@ -1,20 +1,20 @@
-# iOSProxy — independent Dopamine rootless package (0.1.0)
+# iOSProxy v0.2.0 — standalone ARM64 rootless proxy
 
-A small Python 3 SOCKS5 and HTTP proxy service inspired by the **approach** in nneonneo/iOS-SOCKS-Server. This is a separate implementation, not Tethera, TetherM3, or a repackaged commercial tweak.
+This fixes the v0.1.0 unresolved-dependencies installation problem by **removing Python 3**. The executable is compiled with Apple's iPhoneOS SDK and ad-hoc signed; no Pythonista or Python runtime is required.
 
-- Rootless iOS 15+ / Dopamine. **Requires Procursus Python 3** (installed via Sileo dependency).
-- Installed background service: `com.chatin.iosproxy`; log `/var/mobile/iosproxy.log`; errors `/var/mobile/iosproxy.err`.
-- HTTP proxy on port **9877**, SOCKS5 on port **9876**.
-- Only accepts clients from `172.20.10.0/24` (typical iOS Personal Hotspot) or loopback.
-- Does **not** create Wi-Fi, change hotspot state, patch `wifid`/`misd`/`sharingd`, or fix iPhone Wi-Fi disconnect after locking. It only proxies TCP while devices have an existing network link.
-- Does not provide a full device-wide VPN and does not proxy UDP. No authentication, so do not broaden client allowlist without protecting access.
+- iOS 15+ / Dopamine rootless (iPhone 6s Plus)
+- HTTP proxy: 9877; SOCKS5 TCP proxy: 9876
+- Accessible only from 172.20.10.0/24 hotspot subnet and local loopback
+- On iPhone 15: Settings → Wi-Fi → [your hotspot] → HTTP Proxy → Manual: Server 172.20.10.1, Port 9877, no authentication
+- Installed as `com.chatin.iosproxy` launch daemon using `/var/jb/usr/libexec/iosproxy/iosproxyd`
+- No changes to Apple's Personal Hotspot, sharing, NAT, DHCP, wifid or misd.
+- Does NOT keep a sleeping iPhone 15 associated to an idle hotspot, and does not support UDP proxying. Apps ignoring HTTP proxy settings may not use it.
+- Logs: `/var/mobile/iosproxy.err`.
 
-## Install and use
+Uninstall using Sileo. The older v0.1.0 is replaced in-place by v0.2.0.
 
-From GitHub Actions, download `iOSProxy-rootless-DEB`, extract and install the DEB using Sileo. On the iPhone 6s, first enable Apple's normal Personal Hotspot. On the iPhone 15, connect to its Wi-Fi and open **Settings > Wi-Fi > (i) > Configure Proxy > Manual**, server `172.20.10.1`, port `9877`; no authentication.
+## Development
 
-Test Safari browsing while the Wi-Fi link remains connected. Note that this does **not** prevent iPhone 15 from intentionally leaving a hotspot when locked.
+GitHub Actions builds `iosproxyd.c` for iOS arm64 using the iPhoneOS SDK, checks the signature, then packs a rootless DEB using Ubuntu's dpkg-deb.
 
-To uninstall: remove `iOS Proxy Server` in Sileo. The service will be stopped; no tethering system settings are changed.
-
-Original research project: https://github.com/nneonneo/iOS-SOCKS-Server
+Protocol inspiration: https://github.com/nneonneo/iOS-SOCKS-Server

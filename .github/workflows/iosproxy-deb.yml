@@ -8,11 +8,33 @@ on:
 permissions:
   contents: read
 jobs:
-  build:
+  compile:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build signed iOS ARM64 native binary
+        run: |
+          set -eux
+          xcrun --sdk iphoneos clang -arch arm64 -miphoneos-version-min=15.0 -O2 -Wall -Wextra -pthread iosproxy/iosproxyd.c -o iosproxyd
+          codesign --force --sign - --timestamp=none iosproxyd
+          file iosproxyd
+          lipo -info iosproxyd
+          codesign --verify --verbose iosproxyd
+      - uses: actions/upload-artifact@v4
+        with:
+          name: iosproxyd-arm64-binary
+          path: iosproxyd
+          if-no-files-found: error
+  package:
+    needs: compile
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Prepare rootless package
+      - uses: actions/download-artifact@v4
+        with:
+          name: iosproxyd-arm64-binary
+          path: build
+      - name: Package rootless deb with no third-party dependencies
         run: |
           set -eux
           mkdir -p stage/DEBIAN stage/var/jb/usr/libexec/iosproxy stage/var/jb/Library/LaunchDaemons
@@ -20,15 +42,15 @@ jobs:
           cp iosproxy/postinst stage/DEBIAN/postinst
           cp iosproxy/prerm stage/DEBIAN/prerm
           chmod 755 stage/DEBIAN/postinst stage/DEBIAN/prerm
-          cp iosproxy/server.py stage/var/jb/usr/libexec/iosproxy/server.py
-          chmod 755 stage/var/jb/usr/libexec/iosproxy/server.py
+          cp build/iosproxyd stage/var/jb/usr/libexec/iosproxy/iosproxyd
+          chmod 755 stage/var/jb/usr/libexec/iosproxy/iosproxyd
           cp iosproxy/launchd.plist stage/var/jb/Library/LaunchDaemons/com.chatin.iosproxy.plist
-          python3 -m py_compile iosproxy/server.py
-          dpkg-deb --build --root-owner-group stage com.chatin.iosproxy_0.1.0_iphoneos-arm64.deb
-          dpkg-deb --info com.chatin.iosproxy_0.1.0_iphoneos-arm64.deb
-      - name: Upload DEB
-        uses: actions/upload-artifact@v4
+          dpkg-deb --build --root-owner-group stage com.chatin.iosproxy_0.2.0_iphoneos-arm64.deb
+          dpkg-deb --info com.chatin.iosproxy_0.2.0_iphoneos-arm64.deb
+          dpkg-deb --contents com.chatin.iosproxy_0.2.0_iphoneos-arm64.deb
+          ! dpkg-deb -f com.chatin.iosproxy_0.2.0_iphoneos-arm64.deb Depends
+      - uses: actions/upload-artifact@v4
         with:
-          name: iOSProxy-rootless-DEB
-          path: com.chatin.iosproxy_0.1.0_iphoneos-arm64.deb
+          name: iOSProxy-rootless-DEB-v0.2.0
+          path: com.chatin.iosproxy_0.2.0_iphoneos-arm64.deb
           if-no-files-found: error
