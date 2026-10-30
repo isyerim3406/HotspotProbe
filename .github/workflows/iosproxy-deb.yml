@@ -6,7 +6,7 @@ on:
       - 'iosproxy/**'
       - '.github/workflows/iosproxy-deb.yml'
 permissions:
-  contents: read
+  contents: write
 jobs:
   compile:
     runs-on: macos-latest
@@ -54,3 +54,17 @@ jobs:
           name: iOSProxy-rootless-DEB-v0.2.0
           path: com.chatin.iosproxy_0.2.0_iphoneos-arm64.deb
           if-no-files-found: error
+      - name: Publish direct DEB download via GitHub Release
+        if: github.ref == 'refs/heads/main'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -eux
+          FILE=com.chatin.iosproxy_0.2.0_iphoneos-arm64.deb
+          TAG=iosproxy-v0.2.0
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" "$FILE" --clobber
+          else
+            gh release create "$TAG" "$FILE" --title "iOSProxy v0.2.0 rootless" --notes "Standalone signed iOS ARM64 HTTP/SOCKS5 proxy. Fixes Sileo unmet Python dependency issue from v0.1.0. Does not change hotspot management."
+          fi
