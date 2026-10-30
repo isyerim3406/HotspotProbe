@@ -1,8 +1,8 @@
 Package: com.chatin.hotspotprobe
 Name: HotspotProbe
-Version: 1.1.0
+Version: 1.2.0
 Architecture: iphoneos-arm64
-Description: Personal Hotspot disconnect diagnostic logger.
+Description: Passive WiFi SoftAP disconnect diagnostics for iOS 15 rootless.
 Maintainer: Chatin
 Author: Chatin
 Section: Tweaks
