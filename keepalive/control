@@ -1,0 +1,8 @@
+Package: com.hotspotprobe.keepalive
+Name: Hotspot Keepalive (Experimental)
+Version: 0.1.0
+Architecture: iphoneos-arm64
+Maintainer: HotspotProbe experimental packaging
+Depends: python3
+Section: Networking
+Description: Experimental iOS hotspot idle keepalive and locked-client lockdownd hold. No VPN routing. Requires Wi-Fi sync pairing of clients.
