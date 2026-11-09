@@ -20,19 +20,8 @@ jobs:
       - name: Checkout IPA builder
         uses: actions/checkout@v4
 
-      - name: Select Xcode 27
-        shell: bash
-        run: |
-          set -euo pipefail
-          XCODE_PATH="$(find /Applications -maxdepth 1 -type d -name 'Xcode_27*.app' | sort -V | tail -n 1)"
-          if [ -n "$XCODE_PATH" ]; then
-            sudo xcode-select -s "$XCODE_PATH/Contents/Developer"
-          fi
-          xcodebuild -version
-          if ! xcodebuild -version | grep -Eq '^Xcode 27([ .]|$)'; then
-            echo 'Xcode 27 SDK is required by the upstream Xcode project.' >&2
-            exit 1
-          fi
+      - name: Check available Xcode
+        run: xcodebuild -version
 
       - name: Clone original worse_query source
         shell: bash
@@ -42,6 +31,20 @@ jobs:
           git -C upstream rev-parse HEAD
           test -f upstream/worse_query.xcodeproj/project.pbxproj
           test -f upstream/worse_query/worse_query.entitlements
+
+      - name: Backport Xcode project format to available compiler
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('upstream/worse_query.xcodeproj/project.pbxproj')
+          s=p.read_text()
+          s=s.replace('objectVersion = 110;', 'objectVersion = 77;')
+          s=s.replace('IPHONEOS_DEPLOYMENT_TARGET = 27.0;', 'IPHONEOS_DEPLOYMENT_TARGET = 26.0;')
+          p.write_text(s)
+          PY
+          xcodebuild -list -project upstream/worse_query.xcodeproj
 
       - name: Compile unsigned iPhone app
         shell: bash
