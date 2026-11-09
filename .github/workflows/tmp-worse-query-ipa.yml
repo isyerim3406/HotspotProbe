@@ -1,0 +1,94 @@
+name: Temporary worse_query iOS 27 IPA build
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/tmp-worse-query-ipa.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build worse_query unsigned iPhone IPA
+    runs-on: macos-26
+    timeout-minutes: 40
+    steps:
+      - name: Checkout IPA builder
+        uses: actions/checkout@v4
+
+      - name: Select Xcode 27
+        shell: bash
+        run: |
+          set -euo pipefail
+          XCODE_PATH="$(find /Applications -maxdepth 1 -type d -name 'Xcode_27*.app' | sort -V | tail -n 1)"
+          if [ -n "$XCODE_PATH" ]; then
+            sudo xcode-select -s "$XCODE_PATH/Contents/Developer"
+          fi
+          xcodebuild -version
+          if ! xcodebuild -version | grep -Eq '^Xcode 27([ .]|$)'; then
+            echo 'Xcode 27 SDK is required by the upstream Xcode project.' >&2
+            exit 1
+          fi
+
+      - name: Clone original worse_query source
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone --depth 1 https://github.com/forcequitOS/worse_query.git upstream
+          git -C upstream rev-parse HEAD
+          test -f upstream/worse_query.xcodeproj/project.pbxproj
+          test -f upstream/worse_query/worse_query.entitlements
+
+      - name: Compile unsigned iPhone app
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcodebuild \
+            -project upstream/worse_query.xcodeproj \
+            -scheme worse_query \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath "$GITHUB_WORKSPACE/build-output" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            DEVELOPMENT_TEAM= \
+            REGISTER_APP_GROUPS=NO \
+            build 2>&1 | tee "$GITHUB_WORKSPACE/worse-query-build.log"
+
+      - name: Package and verify IPA
+        shell: bash
+        run: |
+          set -euo pipefail
+          APP="$GITHUB_WORKSPACE/build-output/Build/Products/Release-iphoneos/worse_query.app"
+          test -s "$APP/worse_query"
+          lipo -archs "$APP/worse_query" | grep -qw arm64
+          /usr/libexec/PlistBuddy -c 'Print CFBundleIdentifier' "$APP/Info.plist"
+          /usr/libexec/PlistBuddy -c 'Print MinimumOSVersion' "$APP/Info.plist"
+          mkdir -p "$GITHUB_WORKSPACE/ipa/Payload"
+          ditto "$APP" "$GITHUB_WORKSPACE/ipa/Payload/worse_query.app"
+          cd "$GITHUB_WORKSPACE/ipa"
+          zip -qry worse_query-iOS27-unsigned.ipa Payload
+          unzip -tqq worse_query-iOS27-unsigned.ipa
+          test -s worse_query-iOS27-unsigned.ipa
+
+      - name: Upload IPA artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: worse_query-iOS27-unsigned-IPA
+          path: ipa/worse_query-iOS27-unsigned.ipa
+          retention-days: 30
+          if-no-files-found: error
+
+      - name: Upload build diagnostics on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: worse_query-iOS27-build-log
+          path: worse-query-build.log
+          retention-days: 7
+          if-no-files-found: ignore
